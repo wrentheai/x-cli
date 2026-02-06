@@ -567,12 +567,41 @@ export async function reply(accountName: string, postUrl: string, text: string):
   // Dismiss modals again in case they appeared after navigation
   await dismissModals(page);
 
-  // Click the reply button on the main tweet
-  const replyButton = await page.$('[data-testid="reply"]');
-  if (!replyButton) {
-    throw new Error('Could not find reply button');
+  // Extract the status ID from the URL to find the correct tweet
+  const statusMatch = postUrl.match(/status\/(\d+)/);
+  const targetStatusId = statusMatch ? statusMatch[1] : null;
+
+  // Find the correct tweet by looking for the one with matching status ID in its time link
+  // On a tweet detail page, the main tweet has a time element with a link to itself
+  let clicked = false;
+  
+  if (targetStatusId) {
+    // Get all tweets on the page
+    const tweets = await page.$$('[data-testid="tweet"]');
+    
+    for (const tweet of tweets) {
+      // Check if this tweet has a time link pointing to our target status ID
+      const timeLink = await tweet.$(`a[href*="/status/${targetStatusId}"]`);
+      if (timeLink) {
+        // This is the correct tweet - click its reply button
+        const replyBtn = await tweet.$('[data-testid="reply"]');
+        if (replyBtn) {
+          await replyBtn.click();
+          clicked = true;
+          break;
+        }
+      }
+    }
   }
-  await replyButton.click();
+  
+  if (!clicked) {
+    // Fallback: click the first reply button (old behavior)
+    const fallbackButton = await page.$('[data-testid="reply"]');
+    if (!fallbackButton) {
+      throw new Error('Could not find reply button');
+    }
+    await fallbackButton.click();
+  }
 
   // Wait for reply modal and dismiss any blocking overlays
   await page.waitForTimeout(500);
