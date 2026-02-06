@@ -465,23 +465,24 @@ export async function createArticle(title: string, markdownContent: string, publ
     }
   }
 
-  // Tab into the body editor and insert content
-  await page.keyboard.press('Tab');
-  await page.waitForTimeout(300);
+  // Click into the Draft.js body editor and type content
+  const bodyEditor = await page.$('.public-DraftEditor-content, [contenteditable="true"]');
+  if (bodyEditor) {
+    await bodyEditor.click();
+    await page.waitForTimeout(300);
+  }
 
-  // Use execCommand insertText for instant input that editors recognize
-  const inserted = await page.evaluate((text) => {
-    const el = document.querySelector('[contenteditable="true"]') as HTMLElement | null;
-    if (el) {
-      el.focus();
-      return document.execCommand('insertText', false, text);
+  // Type content paragraph by paragraph
+  const paragraphs = markdownContent.split(/\n\n+/);
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i].trim();
+    if (!para) continue;
+    await page.keyboard.type(para, { delay: 1 });
+    if (i < paragraphs.length - 1) {
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(100);
     }
-    return false;
-  }, markdownContent);
-
-  // Fallback to keyboard.type for short content if execCommand failed
-  if (!inserted && markdownContent.length < 500) {
-    await page.keyboard.type(markdownContent, { delay: 10 });
   }
   await page.waitForTimeout(3000);
 
