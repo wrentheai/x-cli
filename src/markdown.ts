@@ -10,6 +10,16 @@ interface MarkdownToken {
   depth?: number;
 }
 
+/** Decode HTML entities that marked's lexer produces (e.g. &quot; &#39; &amp;). */
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 /**
  * Convert markdown to keyboard actions for X's article editor.
  * Parses markdown tokens and applies formatting via toolbar and shortcuts.
@@ -32,23 +42,23 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
       break;
 
     case 'text':
-      await page.keyboard.type(token.text || '', { delay: 1 });
+      await page.keyboard.type(decodeEntities(token.text || ''), { delay: 1 });
       break;
 
     case 'strong':
       await page.keyboard.press('Meta+b');
-      await page.keyboard.type(token.text || getTextFromTokens(token.tokens), { delay: 1 });
+      await page.keyboard.type(decodeEntities(token.text || getTextFromTokens(token.tokens)), { delay: 1 });
       await page.keyboard.press('Meta+b');
       break;
 
     case 'em':
       await page.keyboard.press('Meta+i');
-      await page.keyboard.type(token.text || getTextFromTokens(token.tokens), { delay: 1 });
+      await page.keyboard.type(decodeEntities(token.text || getTextFromTokens(token.tokens)), { delay: 1 });
       await page.keyboard.press('Meta+i');
       break;
 
     case 'link': {
-      const linkText = token.text || getTextFromTokens(token.tokens);
+      const linkText = decodeEntities(token.text || getTextFromTokens(token.tokens));
       await page.keyboard.type(linkText, { delay: 1 });
       for (let i = 0; i < linkText.length; i++) {
         await page.keyboard.press('Shift+ArrowLeft');
@@ -81,7 +91,7 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
 
     case 'code':
     case 'codespan':
-      await page.keyboard.type('`' + (token.text || '') + '`', { delay: 1 });
+      await page.keyboard.type('`' + decodeEntities(token.text || '') + '`', { delay: 1 });
       break;
 
     case 'blockquote':
@@ -95,7 +105,7 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
 
     default:
       if (token.text) {
-        await page.keyboard.type(token.text, { delay: 1 });
+        await page.keyboard.type(decodeEntities(token.text), { delay: 1 });
       }
   }
 }
@@ -122,7 +132,7 @@ async function selectBlockStyle(page: Page, style: string): Promise<void> {
 }
 
 async function typeHeading(page: Page, token: MarkdownToken): Promise<void> {
-  const text = token.text || getTextFromTokens(token.tokens);
+  const text = decodeEntities(token.text || getTextFromTokens(token.tokens));
   const style = (token.depth || 1) <= 2 ? 'Heading' : 'Subheading';
 
   await selectBlockStyle(page, style);
@@ -137,7 +147,7 @@ async function typeParagraph(page: Page, token: MarkdownToken): Promise<void> {
       await processToken(page, subToken);
     }
   } else if (token.text) {
-    await page.keyboard.type(token.text, { delay: 1 });
+    await page.keyboard.type(decodeEntities(token.text), { delay: 1 });
   }
   await page.keyboard.press('Enter');
 }

@@ -495,10 +495,11 @@ export async function createArticle(title: string, markdownContent: string, publ
   await page.waitForTimeout(2000);
   const createButton = await page.locator('button:has-text("create"), [aria-label="create"]').first();
   await createButton.click({ force: true });
+  await page.waitForTimeout(2000);
 
   // Wait for editor to load and type title
   await page.waitForSelector('[placeholder="Add a title"]', { timeout: 15000 });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1000);
   const titleField = await page.$('[placeholder="Add a title"]');
   if (titleField) {
     await titleField.click();
@@ -506,13 +507,16 @@ export async function createArticle(title: string, markdownContent: string, publ
   }
 
   // Click into the body editor and type formatted content
+  await page.waitForSelector('.public-DraftEditor-content', { timeout: 10000 }).catch(() => {});
   const bodyEditor = await page.$('.public-DraftEditor-content, [contenteditable="true"]');
   if (bodyEditor) {
     await bodyEditor.click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
   }
   await typeMarkdownContent(page, markdownContent);
-  await page.waitForTimeout(2000);
+  // Trigger save by clicking outside editor, then wait for autosave
+  await page.mouse.click(100, 100);
+  await page.waitForTimeout(5000);
 
   // Get draft URL
   const draftMatch = page.url().match(/\/compose\/articles\/edit\/(\d+)/);
