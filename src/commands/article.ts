@@ -7,6 +7,7 @@ import { parseMarkdown } from '../markdown.js';
 interface ArticleOptions {
   file?: string;
   body?: string;
+  publish?: boolean;
 }
 
 export async function articleCommand(title: string, options: ArticleOptions): Promise<void> {
@@ -42,10 +43,21 @@ export async function articleCommand(title: string, options: ArticleOptions): Pr
     const finalContent = parsed.content || content;
 
     console.log(chalk.blue(`Creating article: "${finalTitle}"...`));
-    const result = await createArticle(finalTitle, finalContent);
-    console.log(chalk.green('✓ Draft created with title!'));
-    console.log(chalk.yellow('Note: X Articles require manual editing. Open the link, add body content, then click Publish.'));
-    console.log(chalk.cyan(result));
+    if (options.publish) {
+      console.log(chalk.blue('Will attempt to publish after creation...'));
+    }
+    
+    const result = await createArticle(finalTitle, finalContent, options.publish);
+    
+    if (options.publish && (result.includes('/status/') || result.includes('published'))) {
+      console.log(chalk.green('✓ Article published!'));
+      console.log(chalk.cyan(result));
+    } else {
+      console.log(chalk.green('✓ Draft created with title!'));
+      console.log(chalk.yellow('Note: X Articles require manual editing. Open the link, add body content, then click Publish.'));
+      console.log(chalk.yellow('Or use --publish flag to auto-publish after creation.'));
+      console.log(chalk.cyan(result));
+    }
   } catch (error) {
     console.error(chalk.red('Failed to create article:'), error);
     process.exit(1);

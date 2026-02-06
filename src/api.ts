@@ -433,7 +433,7 @@ export async function deletePost(postUrl: string): Promise<string> {
   return 'Post deleted successfully';
 }
 
-export async function createArticle(title: string, markdownContent: string): Promise<string> {
+export async function createArticle(title: string, markdownContent: string, publish = false): Promise<string> {
   const page = await getPage();
 
   // Navigate to articles page
@@ -472,15 +472,77 @@ export async function createArticle(title: string, markdownContent: string): Pro
   // Wait for auto-save
   await page.waitForTimeout(3000);
 
-  // Note: X's Publish button has anti-automation protection
-  // The article is saved as a draft and the user needs to click Publish manually
-  // This is a known limitation of browser automation with X Articles
-  
   // Get the URL which should now have the draft ID
   const currentUrl = page.url();
   const draftMatch = currentUrl.match(/\/compose\/articles\/edit\/(\d+)/);
-  if (draftMatch) {
-    return `https://x.com/compose/articles/edit/${draftMatch[1]}`;
+  const draftUrl = draftMatch ? `https://x.com/compose/articles/edit/${draftMatch[1]}` : null;
+  
+  // If --publish flag is set, attempt to publish
+  if (publish) {
+    try {
+      // Click the first Publish button (opens confirmation dialog)
+      const publishBtn = await page.$('button:has-text("Publish")');
+      if (publishBtn) {
+        await publishBtn.click();
+        await page.waitForTimeout(1500);
+        
+        // Look for the confirmation dialog's Publish button
+        // The dialog has a different structure - look for the button inside it
+        const confirmDialog = await page.$('[role="dialog"], [role="alertdialog"], [data-testid="confirmationSheetDialog"]');
+        if (confirmDialog) {
+          const confirmBtn = await confirmDialog.$('button:has-text("Publish")');
+          if (confirmBtn) {
+            await confirmBtn.click();
+            await page.waitForTimeout(3000);
+            
+            // Check for success alert
+            const successAlert = await page.$('text=Success');
+            if (successAlert) {
+              // Try to get the published article URL from the View link
+              const viewLink = await page.$('a:has-text("View")');
+              if (viewLink) {
+                const href = await viewLink.getAttribute('href');
+                if (href) {
+                  return href.startsWith('http') ? href : `https://x.com${href}`;
+                }
+              }
+              return 'Article published successfully!';
+            }
+          }
+        }
+        
+        // Fallback: try clicking any Publish button visible on page
+        const allPublishBtns = await page.$$('button:has-text("Publish")');
+        for (const btn of allPublishBtns) {
+          const isVisible = await btn.isVisible();
+          if (isVisible) {
+            await btn.click();
+            await page.waitForTimeout(2000);
+            break;
+          }
+        }
+        
+        // Check for success one more time
+        const successCheck = await page.$('text=Success');
+        if (successCheck) {
+          const viewLink = await page.$('a:has-text("View")');
+          if (viewLink) {
+            const href = await viewLink.getAttribute('href');
+            if (href) {
+              return href.startsWith('http') ? href : `https://x.com${href}`;
+            }
+          }
+          return 'Article published successfully!';
+        }
+      }
+    } catch (e) {
+      // Publish failed, return draft URL instead
+      console.error('Publish attempt failed:', e);
+    }
+  }
+  
+  if (draftUrl) {
+    return draftUrl;
   }
   
   // If URL didn't update, navigate to articles list and find the newest draft

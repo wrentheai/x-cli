@@ -39,6 +39,7 @@ program
   .description('Create a long-form article')
   .option('-f, --file <path>', 'Path to markdown file')
   .option('-b, --body <content>', 'Inline markdown content')
+  .option('-p, --publish', 'Attempt to publish immediately after creation')
   .action(articleCommand);
 
 program
