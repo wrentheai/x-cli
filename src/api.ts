@@ -16,7 +16,35 @@ async function dismissModals(page: Page): Promise<void> {
   // Wait a moment for modals to appear
   await page.waitForTimeout(1000);
 
-  // Try clicking various cookie consent buttons
+  // Check if cookie consent mask is present
+  const hasCookieMask = await page.$('[data-testid="twc-cc-mask"]');
+  
+  if (hasCookieMask) {
+    // Try to find and click the actual consent buttons using JavaScript
+    // This is more reliable than Playwright selectors for X's dynamic UI
+    const clicked = await page.evaluate(() => {
+      // Look for buttons in the layers/bottom bar area
+      const buttons = document.querySelectorAll('button, [role="button"]');
+      for (const btn of Array.from(buttons)) {
+        const text = btn.textContent?.toLowerCase() || '';
+        // Accept cookies to dismiss the dialog permanently
+        if (text.includes('accept all') || text.includes('accept cookies') || 
+            text === 'accept' || text.includes('refuse non-essential') ||
+            text.includes('refuse all') || text === 'refuse') {
+          (btn as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (clicked) {
+      // Wait for the consent to be processed
+      await page.waitForTimeout(1500);
+    }
+  }
+
+  // Try clicking various cookie consent buttons with Playwright as backup
   const consentSelectors = [
     // X cookie consent specific selectors
     '[data-testid="BottomBar"] button:has-text("Refuse")',
@@ -33,8 +61,8 @@ async function dismissModals(page: Page): Promise<void> {
     try {
       const btn = await page.$(selector);
       if (btn) {
-        await btn.click();
-        await page.waitForTimeout(500);
+        await btn.click({ force: true });
+        await page.waitForTimeout(1000);
         break;
       }
     } catch {
@@ -42,22 +70,40 @@ async function dismissModals(page: Page): Promise<void> {
     }
   }
 
-  // Forcibly remove the twc-cc-mask overlay if it still exists
-  await page.evaluate(() => {
-    // Remove cookie consent mask
-    const mask = document.querySelector('[data-testid="twc-cc-mask"]');
-    if (mask) mask.remove();
+  // Wait and check if mask is still there
+  await page.waitForTimeout(500);
+  const stillHasMask = await page.$('[data-testid="twc-cc-mask"]');
+  
+  if (stillHasMask) {
+    // Last resort: forcibly remove blocking elements
+    await page.evaluate(() => {
+      // Remove cookie consent mask
+      const mask = document.querySelector('[data-testid="twc-cc-mask"]');
+      if (mask) mask.remove();
 
-    // Remove any element with cc-mask in class
-    document.querySelectorAll('[class*="cc-mask"]').forEach(el => el.remove());
+      // Remove any element with cc-mask in class
+      document.querySelectorAll('[class*="cc-mask"]').forEach(el => el.remove());
 
-    // Remove the bottom bar cookie banner
-    const bottomBar = document.querySelector('[data-testid="BottomBar"]');
-    if (bottomBar) bottomBar.remove();
+      // Remove the bottom bar cookie banner
+      const bottomBar = document.querySelector('[data-testid="BottomBar"]');
+      if (bottomBar) bottomBar.remove();
 
-    // Remove any sheet dialogs that might be blocking
-    document.querySelectorAll('[data-testid="sheetDialog"]').forEach(el => el.remove());
-  }).catch(() => {});
+      // Remove any sheet dialogs that might be blocking
+      document.querySelectorAll('[data-testid="sheetDialog"]').forEach(el => el.remove());
+      
+      // Remove any layers that might be blocking
+      const layers = document.querySelector('#layers');
+      if (layers) {
+        const blockingDivs = layers.querySelectorAll('[class*="r-1pi2tsx"]');
+        blockingDivs.forEach(el => {
+          if (el.getAttribute('data-testid')?.includes('cc') || 
+              el.querySelector('[data-testid*="cc"]')) {
+            el.remove();
+          }
+        });
+      }
+    }).catch(() => {});
+  }
 
   await page.waitForTimeout(300);
 }
@@ -142,20 +188,34 @@ export async function post(accountName: string, text: string): Promise<string> {
   const page = await getPage(accountName);
   await gotoAndDismiss(page, X_URL);
 
+  // Dismiss modals again to ensure clean state
+  await dismissModals(page);
+
   // Wait for and click the compose tweet button
   await page.waitForSelector('[data-testid="SideNav_NewTweet_Button"]', { timeout: 15000 });
-  await page.click('[data-testid="SideNav_NewTweet_Button"]');
+  await page.click('[data-testid="SideNav_NewTweet_Button"]', { force: true });
+  
+  // Dismiss any modals that appeared after clicking compose
+  await page.waitForTimeout(500);
+  await dismissModals(page);
+  
   await page.waitForSelector('[data-testid="tweetTextarea_0"]', { timeout: 10000 });
 
-  // Type the tweet text
-  await page.click('[data-testid="tweetTextarea_0"]');
+  // Dismiss modals once more before typing
+  await dismissModals(page);
+
+  // Type the tweet text using force click
+  await page.click('[data-testid="tweetTextarea_0"]', { force: true });
   await page.keyboard.type(text, { delay: 10 });
 
   // Wait a moment for the text to register
   await page.waitForTimeout(500);
 
-  // Click the post button
-  await page.click('[data-testid="tweetButton"]');
+  // Dismiss any modals before clicking post
+  await dismissModals(page);
+
+  // Click the post button with force
+  await page.click('[data-testid="tweetButton"]', { force: true });
 
   // Wait for the tweet to be posted
   await page.waitForTimeout(2000);
