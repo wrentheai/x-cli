@@ -465,12 +465,12 @@ export async function createArticle(title: string, markdownContent: string, publ
     }
   }
 
-  // Note: X Articles body field resists programmatic input due to complex editor
-  // Draft is created with title only - user adds body content manually
-  await page.waitForTimeout(1000);
+  // Tab into the body editor and type content
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(300);
+  await page.keyboard.type(markdownContent, { delay: 10 });
+  await page.waitForTimeout(2000);
 
-  // Wait for auto-save
-  await page.waitForTimeout(3000);
 
   // Get the URL which should now have the draft ID
   const currentUrl = page.url();
@@ -480,49 +480,39 @@ export async function createArticle(title: string, markdownContent: string, publ
   // If --publish flag is set, attempt to publish
   if (publish) {
     try {
-      // Click the first Publish button (opens confirmation dialog)
+      // Click the Publish button using mouse coordinates to bypass disabled checks
       const publishBtn = await page.$('button:has-text("Publish")');
       if (publishBtn) {
-        await publishBtn.click();
-        await page.waitForTimeout(1500);
-        
-        // Look for the confirmation dialog's Publish button
-        // The dialog has a different structure - look for the button inside it
-        const confirmDialog = await page.$('[role="dialog"], [role="alertdialog"], [data-testid="confirmationSheetDialog"]');
-        if (confirmDialog) {
-          const confirmBtn = await confirmDialog.$('button:has-text("Publish")');
-          if (confirmBtn) {
-            await confirmBtn.click();
-            await page.waitForTimeout(3000);
-            
-            // Check for success alert
-            const successAlert = await page.$('text=Success');
-            if (successAlert) {
-              // Try to get the published article URL from the View link
-              const viewLink = await page.$('a:has-text("View")');
-              if (viewLink) {
-                const href = await viewLink.getAttribute('href');
-                if (href) {
-                  return href.startsWith('http') ? href : `https://x.com${href}`;
-                }
-              }
-              return 'Article published successfully!';
-            }
-          }
+        const box = await publishBtn.boundingBox();
+        if (box) {
+          // First click dismisses tooltip, second click triggers publish
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          await page.waitForTimeout(1500);
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         }
-        
-        // Fallback: try clicking any Publish button visible on page
+        await page.waitForTimeout(3000);
+
+        // Click the Publish button inside the confirmation dialog
+        // The dialog's Publish button is different from the top-bar one
         const allPublishBtns = await page.$$('button:has-text("Publish")');
         for (const btn of allPublishBtns) {
           const isVisible = await btn.isVisible();
-          if (isVisible) {
-            await btn.click();
-            await page.waitForTimeout(2000);
+          const btnBox = await btn.boundingBox();
+          // The dialog Publish button is in the modal area (not the top bar)
+          if (isVisible && btnBox && btnBox.y > 100 && btnBox.y < 300) {
+            await page.mouse.click(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2);
+            await page.waitForTimeout(5000);
             break;
           }
         }
-        
-        // Check for success one more time
+
+        // Check if we navigated to the published article
+        const postUrl = page.url();
+        if (postUrl.includes('/status/')) {
+          return postUrl;
+        }
+
+        // Check for success toast/alert
         const successCheck = await page.$('text=Success');
         if (successCheck) {
           const viewLink = await page.$('a:has-text("View")');
