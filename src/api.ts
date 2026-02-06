@@ -21,7 +21,7 @@ async function dismissModals(page: Page): Promise<void> {
   
   if (hasCookieMask) {
     // Try to find and click the actual consent buttons using JavaScript
-    // This is more reliable than Playwright selectors for X's dynamic UI
+    // Use dispatchEvent to ensure the click is processed
     const clicked = await page.evaluate(() => {
       // Look for buttons in the layers/bottom bar area
       const buttons = document.querySelectorAll('button, [role="button"]');
@@ -31,7 +31,11 @@ async function dismissModals(page: Page): Promise<void> {
         if (text.includes('accept all') || text.includes('accept cookies') || 
             text === 'accept' || text.includes('refuse non-essential') ||
             text.includes('refuse all') || text === 'refuse') {
-          (btn as HTMLElement).click();
+          // Dispatch mouse events to simulate real click
+          const el = btn as HTMLElement;
+          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+          el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+          el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
           return true;
         }
       }
@@ -40,43 +44,49 @@ async function dismissModals(page: Page): Promise<void> {
 
     if (clicked) {
       // Wait for the consent to be processed
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(2000);
     }
   }
 
-  // Try clicking various cookie consent buttons with Playwright as backup
-  const consentSelectors = [
-    // X cookie consent specific selectors
-    '[data-testid="BottomBar"] button:has-text("Refuse")',
-    '[data-testid="BottomBar"] button:has-text("Accept")',
-    'button:has-text("Refuse non-essential")',
-    'button:has-text("Accept all")',
-    'button:has-text("Accept cookies")',
-    '#layers [role="button"]:has-text("Accept")',
-    '#layers [role="button"]:has-text("Refuse")',
-    '[data-testid="sheetDialog"] button',
-  ];
+  // Check again after JavaScript click attempt
+  const stillHasMaskAfterClick = await page.$('[data-testid="twc-cc-mask"]');
+  
+  if (stillHasMaskAfterClick) {
+    // Try clicking via Playwright with force
+    const consentSelectors = [
+      '[data-testid="BottomBar"] button:has-text("Refuse")',
+      '[data-testid="BottomBar"] button:has-text("Accept")',
+      'button:has-text("Refuse non-essential")',
+      'button:has-text("Accept all")',
+      'button:has-text("Accept cookies")',
+      '#layers [role="button"]:has-text("Accept")',
+      '#layers [role="button"]:has-text("Refuse")',
+    ];
 
-  for (const selector of consentSelectors) {
-    try {
-      const btn = await page.$(selector);
-      if (btn) {
-        await btn.click({ force: true });
-        await page.waitForTimeout(1000);
-        break;
+    for (const selector of consentSelectors) {
+      try {
+        const btn = await page.$(selector);
+        if (btn) {
+          await btn.click({ force: true });
+          await page.waitForTimeout(1500);
+          break;
+        }
+      } catch {
+        // Continue to next selector
       }
-    } catch {
-      // Continue to next selector
     }
   }
 
-  // Wait and check if mask is still there
+  // Final check - if mask still there, remove it via DOM manipulation
   await page.waitForTimeout(500);
   const stillHasMask = await page.$('[data-testid="twc-cc-mask"]');
   
   if (stillHasMask) {
-    // Last resort: forcibly remove blocking elements
+    // Last resort: forcibly remove blocking elements AND set cookie
     await page.evaluate(() => {
+      // Try to set the cookie consent preference directly
+      document.cookie = 'twid=1; path=/; domain=.x.com';
+      
       // Remove cookie consent mask
       const mask = document.querySelector('[data-testid="twc-cc-mask"]');
       if (mask) mask.remove();
@@ -91,18 +101,19 @@ async function dismissModals(page: Page): Promise<void> {
       // Remove any sheet dialogs that might be blocking
       document.querySelectorAll('[data-testid="sheetDialog"]').forEach(el => el.remove());
       
-      // Remove any layers that might be blocking
+      // Remove entire #layers if it only contains cookie stuff
       const layers = document.querySelector('#layers');
-      if (layers) {
-        const blockingDivs = layers.querySelectorAll('[class*="r-1pi2tsx"]');
-        blockingDivs.forEach(el => {
-          if (el.getAttribute('data-testid')?.includes('cc') || 
-              el.querySelector('[data-testid*="cc"]')) {
-            el.remove();
+      if (layers && layers.children.length > 0) {
+        // Remove all children that look like overlays
+        Array.from(layers.children).forEach(child => {
+          const testId = child.getAttribute('data-testid') || '';
+          if (testId.includes('cc') || testId.includes('mask') || testId.includes('consent')) {
+            child.remove();
           }
         });
       }
     }).catch(() => {});
+    
   }
 
   await page.waitForTimeout(300);
@@ -214,11 +225,43 @@ export async function post(accountName: string, text: string): Promise<string> {
   // Dismiss any modals before clicking post
   await dismissModals(page);
 
-  // Click the post button with force
-  await page.click('[data-testid="tweetButton"]', { force: true });
+  // Click the post button - try multiple methods
+  const postButton = await page.$('[data-testid="tweetButton"]');
+  if (postButton) {
+    // Try clicking via JavaScript first
+    await page.evaluate((btn) => {
+      const el = btn as HTMLElement;
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }, postButton);
+  }
+  
+  // Also try Playwright click as backup
+  await page.click('[data-testid="tweetButton"]', { force: true }).catch(() => {});
 
   // Wait for the tweet to be posted
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(3000);
+
+  // Verify the post was actually sent by checking if compose modal closed
+  const composeStillOpen = await page.$('[data-testid="tweetTextarea_0"]');
+  if (composeStillOpen) {
+    // Try clicking Post button again with different method
+    await page.evaluate(() => {
+      const btn = document.querySelector('[data-testid="tweetButton"]') as HTMLElement;
+      if (btn) {
+        btn.click();
+      }
+    });
+    await page.waitForTimeout(2000);
+  }
+
+  // Check again
+  const stillOpen = await page.$('[data-testid="tweetTextarea_0"]');
+  if (stillOpen) {
+    // Take a screenshot for debugging
+    await page.screenshot({ path: '/tmp/x-cli-post-failed.png' });
+    console.log('Screenshot saved to /tmp/x-cli-post-failed.png');
+    throw new Error('Post failed - compose modal still open. Cookie consent may be blocking.');
+  }
 
   // Try to get the URL of the posted tweet from the notification or redirect
   const postUrl = await page.evaluate(() => {

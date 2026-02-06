@@ -56,8 +56,11 @@ export async function getPersistentContext(accountName: string, headless = true)
   return context;
 }
 
+// Set to true to debug visually
+const DEBUG_VISIBLE = process.env.X_CLI_VISIBLE === '1';
+
 export async function getPage(accountName: string): Promise<Page> {
-  const ctx = await getPersistentContext(accountName);
+  const ctx = await getPersistentContext(accountName, !DEBUG_VISIBLE);
   const pages = ctx.pages();
   return pages.length > 0 ? pages[0] : await ctx.newPage();
 }
