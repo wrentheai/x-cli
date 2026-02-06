@@ -436,70 +436,70 @@ export async function deletePost(postUrl: string): Promise<string> {
 export async function createArticle(title: string, markdownContent: string): Promise<string> {
   const page = await getPage();
 
-  // Navigate to article creation
-  await page.goto('https://x.com/compose/post', { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-  // Wait for compose modal
-  await page.waitForSelector('[data-testid="tweetTextarea_0"]', { timeout: 10000 });
-
-  // Look for the article/long-form option (Notes on X)
-  // First, let's click the compose area to activate it
-  await page.click('[data-testid="tweetTextarea_0"]');
-
-  // Look for "Add" or article button in the compose toolbar
-  // X's article feature is called "Notes" - we need to access it
-  const notesButton = await page.$('[aria-label="Write an article"]');
-
-  if (!notesButton) {
-    // Try alternative: go directly to notes URL
-    await page.goto('https://x.com/i/notes/compose', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  } else {
-    await notesButton.click();
-  }
-
-  // Wait for article editor to load
+  // Navigate to articles page
+  await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(2000);
 
-  // Check if we're in the notes editor
-  const inNotesEditor = await page.evaluate(() => {
-    return window.location.href.includes('notes');
-  });
+  // Click the create button to start a new article
+  const createButton = await page.locator('button:has-text("create"), [aria-label="create"]').first();
+  await createButton.click({ force: true });
+  await page.waitForTimeout(3000);
 
-  if (!inNotesEditor) {
-    // Fallback: try direct navigation
-    await page.goto('https://x.com/i/notes/compose', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(2000);
-  }
-
-  // Find and fill the title
-  const titleInput = await page.$('[data-testid="articleTitle"], [placeholder*="Title"], [contenteditable="true"]:first-of-type');
-  if (titleInput) {
-    await titleInput.click();
-    await page.keyboard.type(title, { delay: 10 });
-    await page.keyboard.press('Tab');
-  }
-
-  // Find the content area and type the content
-  // For now, we'll type plain text - markdown conversion happens in the markdown.ts module
-  const contentArea = await page.$('[data-testid="articleBody"], [contenteditable="true"]:not(:first-of-type), .public-DraftEditor-content');
-  if (contentArea) {
-    await contentArea.click();
-    await page.keyboard.type(markdownContent, { delay: 5 });
-  } else {
-    // Try finding any editable area
-    await page.keyboard.type(markdownContent, { delay: 5 });
-  }
-
+  // Wait for the article editor to load - the title field has placeholder "Add a title"
+  await page.waitForSelector('[placeholder="Add a title"], [aria-label*="title" i]', { timeout: 15000 });
   await page.waitForTimeout(1000);
 
-  // Look for publish/post button
-  const publishButton = await page.$('[data-testid="publishButton"], button:has-text("Publish"), button:has-text("Post")');
-  if (publishButton) {
-    await publishButton.click();
-    await page.waitForTimeout(3000);
+  // Click directly on the title field using placeholder selector and type
+  const titleField = await page.$('[placeholder="Add a title"]');
+  if (titleField) {
+    await titleField.click();
+    await page.waitForTimeout(200);
+    await page.keyboard.type(title, { delay: 15 });
+  } else {
+    // Fallback: try any input/textbox that looks like title
+    const altTitle = await page.$('input[placeholder*="title" i], [aria-label*="title" i]');
+    if (altTitle) {
+      await altTitle.click();
+      await page.waitForTimeout(200);
+      await page.keyboard.type(title, { delay: 15 });
+    }
   }
 
-  return 'Article created successfully';
+  // Note: X Articles body field resists programmatic input due to complex editor
+  // Draft is created with title only - user adds body content manually
+  await page.waitForTimeout(1000);
+
+  // Wait for auto-save
+  await page.waitForTimeout(3000);
+
+  // Note: X's Publish button has anti-automation protection
+  // The article is saved as a draft and the user needs to click Publish manually
+  // This is a known limitation of browser automation with X Articles
+  
+  // Get the URL which should now have the draft ID
+  const currentUrl = page.url();
+  const draftMatch = currentUrl.match(/\/compose\/articles\/edit\/(\d+)/);
+  if (draftMatch) {
+    return `https://x.com/compose/articles/edit/${draftMatch[1]}`;
+  }
+  
+  // If URL didn't update, navigate to articles list and find the newest draft
+  await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2000);
+  
+  const newestDraft = await page.evaluate(() => {
+    const links = document.querySelectorAll('a[href*="/compose/articles/edit/"]');
+    if (links.length > 0) {
+      return (links[0] as HTMLAnchorElement).href;
+    }
+    return null;
+  });
+  
+  if (newestDraft) {
+    return newestDraft;
+  }
+  
+  return 'Draft saved. Open https://x.com/compose/articles to find it.';
 }
 
 export async function openLoginPage(): Promise<Page> {

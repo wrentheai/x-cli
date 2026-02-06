@@ -43,8 +43,9 @@ export async function articleCommand(title: string, options: ArticleOptions): Pr
 
     console.log(chalk.blue(`Creating article: "${finalTitle}"...`));
     const result = await createArticle(finalTitle, finalContent);
-    console.log(chalk.green('✓ Article created successfully!'));
-    console.log(chalk.gray(result));
+    console.log(chalk.green('✓ Draft created with title!'));
+    console.log(chalk.yellow('Note: X Articles require manual editing. Open the link, add body content, then click Publish.'));
+    console.log(chalk.cyan(result));
   } catch (error) {
     console.error(chalk.red('Failed to create article:'), error);
     process.exit(1);
