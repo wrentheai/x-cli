@@ -33,27 +33,27 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
       break;
 
     case 'text':
-      await page.keyboard.type(token.text || '', { delay: 5 });
+      await page.keyboard.type(token.text || '', { delay: 1 });
       break;
 
     case 'strong':
       // Bold text - use Cmd+B on Mac, Ctrl+B on others
       await page.keyboard.press('Meta+b');
-      await page.keyboard.type(token.text || getTextFromTokens(token.tokens), { delay: 5 });
+      await page.keyboard.type(token.text || getTextFromTokens(token.tokens), { delay: 1 });
       await page.keyboard.press('Meta+b');
       break;
 
     case 'em':
       // Italic text - use Cmd+I on Mac, Ctrl+I on others
       await page.keyboard.press('Meta+i');
-      await page.keyboard.type(token.text || getTextFromTokens(token.tokens), { delay: 5 });
+      await page.keyboard.type(token.text || getTextFromTokens(token.tokens), { delay: 1 });
       await page.keyboard.press('Meta+i');
       break;
 
     case 'link':
       // Type link text, select it, and apply link
       const linkText = token.text || getTextFromTokens(token.tokens);
-      await page.keyboard.type(linkText, { delay: 5 });
+      await page.keyboard.type(linkText, { delay: 1 });
       // Select the text we just typed
       for (let i = 0; i < linkText.length; i++) {
         await page.keyboard.press('Shift+ArrowLeft');
@@ -61,7 +61,7 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
       // Try to apply link - this varies by editor
       await page.keyboard.press('Meta+k');
       await page.waitForTimeout(300);
-      await page.keyboard.type(token.href || '', { delay: 5 });
+      await page.keyboard.type(token.href || '', { delay: 1 });
       await page.keyboard.press('Enter');
       break;
 
@@ -72,7 +72,7 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
 
     case 'list':
       for (const item of token.items || []) {
-        await page.keyboard.type('• ', { delay: 5 });
+        await page.keyboard.type('• ', { delay: 1 });
         await processToken(page, item);
         await page.keyboard.press('Enter');
       }
@@ -88,15 +88,15 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
 
     case 'code':
       // Inline code
-      await page.keyboard.type('`' + (token.text || '') + '`', { delay: 5 });
+      await page.keyboard.type('`' + (token.text || '') + '`', { delay: 1 });
       break;
 
     case 'codespan':
-      await page.keyboard.type('`' + (token.text || '') + '`', { delay: 5 });
+      await page.keyboard.type('`' + (token.text || '') + '`', { delay: 1 });
       break;
 
     case 'blockquote':
-      await page.keyboard.type('> ', { delay: 5 });
+      await page.keyboard.type('> ', { delay: 1 });
       if (token.tokens) {
         for (const subToken of token.tokens) {
           await processToken(page, subToken);
@@ -107,7 +107,7 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
     default:
       // For unknown tokens, just try to type any text content
       if (token.text) {
-        await page.keyboard.type(token.text, { delay: 5 });
+        await page.keyboard.type(token.text, { delay: 1 });
       }
   }
 }
@@ -116,11 +116,56 @@ async function typeHeading(page: Page, token: MarkdownToken): Promise<void> {
   const text = token.text || getTextFromTokens(token.tokens);
   const depth = token.depth || 1;
 
-  // X's article editor might use different methods for headings
-  // Try using markdown syntax which some editors auto-convert
-  const prefix = '#'.repeat(depth) + ' ';
-  await page.keyboard.type(prefix + text, { delay: 5 });
+  // Click the Body/Heading dropdown in the toolbar
+  const dropdown = await page.$('button:has-text("Body"), button:has-text("Heading"), button:has-text("Subheading")');
+  if (dropdown) {
+    const box = await dropdown.boundingBox();
+    if (box) {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForTimeout(300);
+
+      // Select Heading (depth 1-2) or Subheading (depth 3+)
+      const targetStyle = depth <= 2 ? 'Heading' : 'Subheading';
+      const option = await page.$(`[role="option"]:has-text("${targetStyle}"), [role="menuitem"]:has-text("${targetStyle}")`);
+      if (option) {
+        await option.click();
+      } else {
+        // Fallback: click by text
+        const allOptions = await page.$$('[role="option"], [role="menuitem"], [role="listbox"] div');
+        for (const opt of allOptions) {
+          const optText = await opt.textContent();
+          if (optText?.trim() === targetStyle) {
+            await opt.click();
+            break;
+          }
+        }
+      }
+      await page.waitForTimeout(300);
+    }
+  }
+
+  await page.keyboard.type(text, { delay: 1 });
   await page.keyboard.press('Enter');
+
+  // Switch back to Body style
+  const dropdownAfter = await page.$('button:has-text("Body"), button:has-text("Heading"), button:has-text("Subheading")');
+  if (dropdownAfter) {
+    const box = await dropdownAfter.boundingBox();
+    if (box) {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForTimeout(300);
+      const bodyOption = await page.$$('[role="option"], [role="menuitem"], [role="listbox"] div');
+      for (const opt of bodyOption) {
+        const optText = await opt.textContent();
+        if (optText?.trim() === 'Body') {
+          await opt.click();
+          break;
+        }
+      }
+      await page.waitForTimeout(200);
+    }
+  }
+
   await page.keyboard.press('Enter');
 }
 
@@ -130,7 +175,7 @@ async function typeParagraph(page: Page, token: MarkdownToken): Promise<void> {
       await processToken(page, subToken);
     }
   } else if (token.text) {
-    await page.keyboard.type(token.text, { delay: 5 });
+    await page.keyboard.type(token.text, { delay: 1 });
   }
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');

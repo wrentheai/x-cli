@@ -1,5 +1,6 @@
 import { Page } from 'playwright';
 import { getPage, getPersistentContext } from './browser.js';
+import { typeMarkdownContent } from './markdown.js';
 
 const X_URL = 'https://x.com';
 
@@ -465,25 +466,15 @@ export async function createArticle(title: string, markdownContent: string, publ
     }
   }
 
-  // Click into the Draft.js body editor and type content
+  // Click into the Draft.js body editor
   const bodyEditor = await page.$('.public-DraftEditor-content, [contenteditable="true"]');
   if (bodyEditor) {
     await bodyEditor.click();
     await page.waitForTimeout(300);
   }
 
-  // Type content paragraph by paragraph
-  const paragraphs = markdownContent.split(/\n\n+/);
-  for (let i = 0; i < paragraphs.length; i++) {
-    const para = paragraphs[i].trim();
-    if (!para) continue;
-    await page.keyboard.type(para, { delay: 1 });
-    if (i < paragraphs.length - 1) {
-      await page.keyboard.press('Enter');
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(100);
-    }
-  }
+  // Type markdown content with proper formatting
+  await typeMarkdownContent(page, markdownContent);
   await page.waitForTimeout(3000);
 
   // Scroll back to top so Publish button is visible
