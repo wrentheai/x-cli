@@ -10,6 +10,9 @@ import { replyCommand } from './commands/reply.js';
 import { deleteCommand } from './commands/delete.js';
 import { loginCommand } from './commands/login.js';
 import { logoutCommand } from './commands/logout.js';
+import { analyticsCommand } from './commands/analytics.js';
+import { meCommand } from './commands/me.js';
+import { searchCommand } from './commands/search.js';
 
 program
   .name('x-cli')
@@ -66,5 +69,24 @@ program
   .command('delete <post-url>')
   .description('Delete a post')
   .action(deleteCommand);
+
+program
+  .command('analytics')
+  .description('View your account analytics')
+  .option('-d, --days <number>', 'Number of days to show (7, 28, 90)', '28')
+  .action(analyticsCommand);
+
+program
+  .command('me')
+  .description('View your recent posts with engagement metrics')
+  .option('-c, --count <number>', 'Number of posts to show', '10')
+  .action(meCommand);
+
+program
+  .command('search <query>')
+  .description('Search for posts')
+  .option('-c, --count <number>', 'Number of results to show', '10')
+  .option('-t, --top', 'Show top results instead of latest')
+  .action(searchCommand);
 
 program.parse();

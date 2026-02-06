@@ -510,3 +510,233 @@ export async function openLoginPage(): Promise<Page> {
   await page.waitForSelector('input[autocomplete="username"], input[name="text"], [data-testid="loginButton"]', { timeout: 30000 }).catch(() => {});
   return page;
 }
+
+// Analytics interfaces and functions
+export interface AnalyticsData {
+  summary: {
+    posts: string;
+    impressions: string;
+    profileVisits: string;
+    followers: string;
+    newFollowers?: string;
+  };
+  topPosts: Array<{
+    text: string;
+    impressions: string;
+    engagements: string;
+    engagementRate: string;
+    date: string;
+    url: string;
+  }>;
+}
+
+export async function getAnalytics(days = 28): Promise<AnalyticsData> {
+  const page = await getPage();
+  
+  // First get follower count from profile
+  await page.goto('https://x.com/WrenTheAI', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(2000);
+  
+  const profileStats = await page.evaluate(() => {
+    const followersLink = document.querySelector('a[href*="/verified_followers"], a[href*="/followers"]');
+    const followingLink = document.querySelector('a[href*="/following"]');
+    return {
+      followers: followersLink?.textContent?.match(/(\d+[,.]?\d*[KMB]?)/)?.[1] || '0',
+      following: followingLink?.textContent?.match(/(\d+[,.]?\d*[KMB]?)/)?.[1] || '0',
+    };
+  });
+  
+  // Get recent posts with their metrics
+  const posts = await getMyPosts(20);
+  
+  // Calculate totals
+  let totalViews = 0;
+  let totalLikes = 0;
+  let totalReposts = 0;
+  let totalReplies = 0;
+  
+  const parseMetric = (val: string): number => {
+    if (!val || val === '0') return 0;
+    const cleaned = val.replace(/,/g, '');
+    if (cleaned.endsWith('K')) return parseFloat(cleaned) * 1000;
+    if (cleaned.endsWith('M')) return parseFloat(cleaned) * 1000000;
+    return parseInt(cleaned, 10) || 0;
+  };
+  
+  for (const post of posts) {
+    totalViews += parseMetric(post.views);
+    totalLikes += parseMetric(post.likes);
+    totalReposts += parseMetric(post.retweets);
+    totalReplies += parseMetric(post.replies);
+  }
+  
+  const formatNum = (n: number): string => {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return n.toString();
+  };
+  
+  // Sort posts by views to get top performers
+  const sortedPosts = [...posts].sort((a, b) => parseMetric(b.views) - parseMetric(a.views));
+  
+  const result: AnalyticsData = {
+    summary: {
+      posts: posts.length.toString(),
+      impressions: formatNum(totalViews),
+      profileVisits: 'N/A',
+      followers: profileStats.followers,
+    },
+    topPosts: sortedPosts.slice(0, 5).map(p => ({
+      text: p.text,
+      impressions: p.views,
+      engagements: (parseMetric(p.likes) + parseMetric(p.retweets) + parseMetric(p.replies)).toString(),
+      engagementRate: totalViews > 0 ? 
+        ((parseMetric(p.likes) + parseMetric(p.retweets) + parseMetric(p.replies)) / parseMetric(p.views) * 100).toFixed(1) + '%' : '0%',
+      date: p.timestamp,
+      url: p.url,
+    })),
+  };
+  
+  return result;
+}
+
+export async function getMyPosts(count = 10): Promise<TimelinePost[]> {
+  const page = await getPage();
+  
+  // Navigate to my profile
+  await page.goto('https://x.com/WrenTheAI', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  
+  // Wait for posts to load
+  await page.waitForSelector('[data-testid="tweet"]', { timeout: 15000 });
+  
+  // Scroll to load more posts
+  for (let i = 0; i < Math.ceil(count / 5); i++) {
+    await page.evaluate(() => window.scrollBy(0, 800));
+    await page.waitForTimeout(500);
+  }
+  
+  const posts = await page.evaluate((maxCount) => {
+    const tweets = document.querySelectorAll('[data-testid="tweet"]');
+    const results: TimelinePost[] = [];
+    
+    for (const tweet of Array.from(tweets).slice(0, maxCount)) {
+      try {
+        const userLink = tweet.querySelector('a[href^="/"][role="link"]');
+        const handle = userLink?.getAttribute('href')?.slice(1) || 'unknown';
+        const displayName = tweet.querySelector('[data-testid="User-Name"]')?.textContent?.split('@')[0]?.trim() || handle;
+        
+        const textEl = tweet.querySelector('[data-testid="tweetText"]');
+        const text = textEl?.textContent || '';
+        
+        const timeEl = tweet.querySelector('time');
+        const timestamp = timeEl?.getAttribute('datetime') || '';
+        const tweetLink = timeEl?.closest('a')?.getAttribute('href') || '';
+        const url = tweetLink ? `https://x.com${tweetLink}` : '';
+        
+        // Get images
+        const imageEls = tweet.querySelectorAll('[data-testid="tweetPhoto"] img');
+        const images: string[] = [];
+        for (const img of Array.from(imageEls)) {
+          const src = img.getAttribute('src');
+          if (src && !src.includes('profile_images')) images.push(src);
+        }
+        
+        // Get metrics
+        const viewsEl = tweet.querySelector('a[href*="/analytics"] span span');
+        const likesEl = tweet.querySelector('[data-testid="like"] span');
+        const retweetsEl = tweet.querySelector('[data-testid="retweet"] span');
+        const repliesEl = tweet.querySelector('[data-testid="reply"] span');
+        
+        results.push({
+          author: displayName,
+          handle: `@${handle}`,
+          text,
+          url,
+          timestamp,
+          views: viewsEl?.textContent || '0',
+          likes: likesEl?.textContent || '0',
+          retweets: retweetsEl?.textContent || '0',
+          replies: repliesEl?.textContent || '0',
+          images,
+        });
+      } catch (e) {
+        // Skip malformed tweets
+      }
+    }
+    
+    return results;
+  }, count);
+  
+  return posts;
+}
+
+export async function searchPosts(query: string, count = 10, useTop = false): Promise<TimelinePost[]> {
+  const page = await getPage();
+  
+  // Navigate to search
+  const searchUrl = `https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query${useTop ? '&f=top' : '&f=live'}`;
+  await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  
+  // Wait for results to load
+  await page.waitForSelector('[data-testid="tweet"]', { timeout: 15000 });
+  
+  // Scroll to load more
+  for (let i = 0; i < Math.ceil(count / 5); i++) {
+    await page.evaluate(() => window.scrollBy(0, 800));
+    await page.waitForTimeout(500);
+  }
+  
+  const posts = await page.evaluate((maxCount) => {
+    const tweets = document.querySelectorAll('[data-testid="tweet"]');
+    const results: TimelinePost[] = [];
+    
+    for (const tweet of Array.from(tweets).slice(0, maxCount)) {
+      try {
+        const userLink = tweet.querySelector('a[href^="/"][role="link"]');
+        const handle = userLink?.getAttribute('href')?.slice(1) || 'unknown';
+        const displayName = tweet.querySelector('[data-testid="User-Name"]')?.textContent?.split('@')[0]?.trim() || handle;
+        
+        const textEl = tweet.querySelector('[data-testid="tweetText"]');
+        const text = textEl?.textContent || '';
+        
+        const timeEl = tweet.querySelector('time');
+        const timestamp = timeEl?.getAttribute('datetime') || '';
+        const tweetLink = timeEl?.closest('a')?.getAttribute('href') || '';
+        const url = tweetLink ? `https://x.com${tweetLink}` : '';
+        
+        // Get images
+        const imageEls = tweet.querySelectorAll('[data-testid="tweetPhoto"] img');
+        const images: string[] = [];
+        for (const img of Array.from(imageEls)) {
+          const src = img.getAttribute('src');
+          if (src && !src.includes('profile_images')) images.push(src);
+        }
+        
+        // Get metrics
+        const viewsEl = tweet.querySelector('a[href*="/analytics"] span span');
+        const likesEl = tweet.querySelector('[data-testid="like"] span');
+        const retweetsEl = tweet.querySelector('[data-testid="retweet"] span');
+        const repliesEl = tweet.querySelector('[data-testid="reply"] span');
+        
+        results.push({
+          author: displayName,
+          handle: `@${handle}`,
+          text,
+          url,
+          timestamp,
+          views: viewsEl?.textContent || '0',
+          likes: likesEl?.textContent || '0',
+          retweets: retweetsEl?.textContent || '0',
+          replies: repliesEl?.textContent || '0',
+          images,
+        });
+      } catch (e) {
+        // Skip malformed tweets
+      }
+    }
+    
+    return results;
+  }, count);
+  
+  return posts;
+}
