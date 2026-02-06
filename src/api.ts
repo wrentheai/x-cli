@@ -12,26 +12,53 @@ async function gotoAndDismiss(page: Page, url: string, options?: { waitUntil?: '
 
 /** Dismiss cookie consent / login modals that block interaction on X pages. */
 async function dismissModals(page: Page): Promise<void> {
-  // Cookie consent overlay (twc-cc-mask or similar)
-  for (const selector of [
-    '[data-testid="BottomBar"] button',          // "Accept" in bottom cookie bar
-    '#layers [role="button"]:has-text("Accept")', // modal accept button
-    '[class*="cc-mask"] button',                  // twc-cc-mask buttons
-    '[data-testid="sheetDialog"] [role="button"]:has-text("Accept all")',
-  ]) {
-    const btn = await page.$(selector);
-    if (btn) {
-      await btn.click().catch(() => {});
-      await page.waitForTimeout(500);
-      break;
+  // Wait a moment for modals to appear
+  await page.waitForTimeout(1000);
+
+  // Try clicking various cookie consent buttons
+  const consentSelectors = [
+    // X cookie consent specific selectors
+    '[data-testid="BottomBar"] button:has-text("Refuse")',
+    '[data-testid="BottomBar"] button:has-text("Accept")',
+    'button:has-text("Refuse non-essential")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept cookies")',
+    '#layers [role="button"]:has-text("Accept")',
+    '#layers [role="button"]:has-text("Refuse")',
+    '[data-testid="sheetDialog"] button',
+  ];
+
+  for (const selector of consentSelectors) {
+    try {
+      const btn = await page.$(selector);
+      if (btn) {
+        await btn.click();
+        await page.waitForTimeout(500);
+        break;
+      }
+    } catch {
+      // Continue to next selector
     }
   }
-  // Remove any leftover overlay that blocks clicks
+
+  // Forcibly remove the twc-cc-mask overlay if it still exists
   await page.evaluate(() => {
-    for (const el of document.querySelectorAll('[class*="cc-mask"], [class*="cookie"]')) {
-      (el as HTMLElement).style.display = 'none';
-    }
+    // Remove cookie consent mask
+    const mask = document.querySelector('[data-testid="twc-cc-mask"]');
+    if (mask) mask.remove();
+    
+    // Remove any element with cc-mask in class
+    document.querySelectorAll('[class*="cc-mask"]').forEach(el => el.remove());
+    
+    // Remove the bottom bar cookie banner
+    const bottomBar = document.querySelector('[data-testid="BottomBar"]');
+    if (bottomBar) bottomBar.remove();
+    
+    // Remove any sheet dialogs that might be blocking
+    document.querySelectorAll('[data-testid="sheetDialog"]').forEach(el => el.remove());
   }).catch(() => {});
+
+  await page.waitForTimeout(300);
 }
 
 export interface Notification {
@@ -405,6 +432,9 @@ export async function reply(postUrl: string, text: string): Promise<string> {
 
   // Wait for the tweet to load
   await page.waitForSelector('[data-testid="tweet"]', { timeout: 10000 });
+  
+  // Dismiss modals again in case they appeared after navigation
+  await dismissModals(page);
 
   // Click the reply button on the main tweet
   const replyButton = await page.$('[data-testid="reply"]');
@@ -413,17 +443,28 @@ export async function reply(postUrl: string, text: string): Promise<string> {
   }
   await replyButton.click();
 
-  // Wait for reply modal
+  // Wait for reply modal and dismiss any blocking overlays
+  await page.waitForTimeout(500);
+  await dismissModals(page);
+  
   await page.waitForSelector('[data-testid="tweetTextarea_0"]', { timeout: 10000 });
+  
+  // Dismiss again after modal opens
+  await dismissModals(page);
 
-  // Type the reply
-  await page.click('[data-testid="tweetTextarea_0"]');
+  // Type the reply using force click to bypass any remaining overlays
+  const textarea = await page.$('[data-testid="tweetTextarea_0"]');
+  if (textarea) {
+    await textarea.click({ force: true });
+  } else {
+    await page.click('[data-testid="tweetTextarea_0"]', { force: true });
+  }
   await page.keyboard.type(text, { delay: 10 });
 
   await page.waitForTimeout(500);
 
-  // Click reply/post button
-  await page.click('[data-testid="tweetButton"]');
+  // Click reply/post button with force
+  await page.click('[data-testid="tweetButton"]', { force: true });
 
   // Wait for the reply to be posted
   await page.waitForTimeout(2000);
