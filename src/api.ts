@@ -434,137 +434,111 @@ export async function deletePost(postUrl: string): Promise<string> {
   return 'Post deleted successfully';
 }
 
-export async function createArticle(title: string, markdownContent: string, publish = false): Promise<string> {
-  const page = await getPage();
+/** Click the center of an element's bounding box. */
+async function clickCenter(page: Page, el: import('playwright').ElementHandle): Promise<boolean> {
+  const box = await el.boundingBox();
+  if (!box) return false;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  return true;
+}
 
-  // Navigate to articles page
-  await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(2000);
+/** Open the publish confirmation dialog and confirm. Returns the published URL or null. */
+async function publishArticle(page: Page): Promise<string | null> {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(500);
 
-  // Click the create button to start a new article
-  const createButton = await page.locator('button:has-text("create"), [aria-label="create"]').first();
-  await createButton.click({ force: true });
+  const publishBtn = await page.$('button:has-text("Publish")');
+  if (!publishBtn) return null;
+
+  // First click shows tooltip, click away to dismiss, then click again to open dialog
+  await clickCenter(page, publishBtn);
+  await page.waitForTimeout(1000);
+  const box = await publishBtn.boundingBox();
+  if (box) await page.mouse.click(box.x - 100, box.y);
+  await page.waitForTimeout(500);
+  await clickCenter(page, publishBtn);
   await page.waitForTimeout(3000);
 
-  // Wait for the article editor to load - the title field has placeholder "Add a title"
-  await page.waitForSelector('[placeholder="Add a title"], [aria-label*="title" i]', { timeout: 15000 });
-  await page.waitForTimeout(1000);
-
-  // Click directly on the title field using placeholder selector and type
-  const titleField = await page.$('[placeholder="Add a title"]');
-  if (titleField) {
-    await titleField.click();
-    await page.waitForTimeout(200);
-    await page.keyboard.type(title, { delay: 15 });
-  } else {
-    // Fallback: try any input/textbox that looks like title
-    const altTitle = await page.$('input[placeholder*="title" i], [aria-label*="title" i]');
-    if (altTitle) {
-      await altTitle.click();
-      await page.waitForTimeout(200);
-      await page.keyboard.type(title, { delay: 15 });
+  // Confirm in the dialog
+  const dialog = await page.$('[role="dialog"]');
+  if (dialog) {
+    const confirmBtn = await dialog.$('button:has-text("Publish")');
+    if (confirmBtn) {
+      await clickCenter(page, confirmBtn);
+      await page.waitForTimeout(5000);
     }
   }
 
-  // Click into the Draft.js body editor
+  // Check for published URL
+  const postUrl = page.url();
+  if (postUrl.includes('/status/')) return postUrl;
+
+  // Check for success toast with View link
+  const successEl = await page.$('text=Success');
+  if (successEl) {
+    const viewLink = await page.$('a:has-text("View")');
+    if (viewLink) {
+      const href = await viewLink.getAttribute('href');
+      if (href) return href.startsWith('http') ? href : `https://x.com${href}`;
+    }
+    return 'Article published successfully!';
+  }
+
+  return null;
+}
+
+export async function createArticle(title: string, markdownContent: string, publish = false): Promise<string> {
+  const page = await getPage();
+
+  // Navigate and create new article
+  await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(2000);
+  const createButton = await page.locator('button:has-text("create"), [aria-label="create"]').first();
+  await createButton.click({ force: true });
+
+  // Wait for editor to load and type title
+  await page.waitForSelector('[placeholder="Add a title"]', { timeout: 15000 });
+  await page.waitForTimeout(500);
+  const titleField = await page.$('[placeholder="Add a title"]');
+  if (titleField) {
+    await titleField.click();
+    await page.keyboard.type(title, { delay: 15 });
+  }
+
+  // Click into the body editor and type formatted content
   const bodyEditor = await page.$('.public-DraftEditor-content, [contenteditable="true"]');
   if (bodyEditor) {
     await bodyEditor.click();
     await page.waitForTimeout(300);
   }
-
-  // Type markdown content with proper formatting
   await typeMarkdownContent(page, markdownContent);
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(2000);
 
-  // Scroll back to top so Publish button is visible
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(500);
-
-  // Get the URL which should now have the draft ID
-  const currentUrl = page.url();
-  const draftMatch = currentUrl.match(/\/compose\/articles\/edit\/(\d+)/);
+  // Get draft URL
+  const draftMatch = page.url().match(/\/compose\/articles\/edit\/(\d+)/);
   const draftUrl = draftMatch ? `https://x.com/compose/articles/edit/${draftMatch[1]}` : null;
-  
-  // If --publish flag is set, attempt to publish
+
+  // Publish if requested
   if (publish) {
     try {
-      // Click the Publish button using mouse coordinates to bypass disabled checks
-      const publishBtn = await page.$('button:has-text("Publish")');
-      if (publishBtn) {
-        const box = await publishBtn.boundingBox();
-        if (box) {
-          // First click shows tooltip
-          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-          await page.waitForTimeout(1000);
-          // Click elsewhere to dismiss tooltip
-          await page.mouse.click(box.x - 100, box.y);
-          await page.waitForTimeout(500);
-          // Second click opens the publish dialog
-          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        }
-        await page.waitForTimeout(3000);
-
-        // Click the Publish button inside the confirmation dialog
-        // Find the dialog first, then click its Publish button
-        const dialog = await page.$('[role="dialog"]');
-        if (dialog) {
-          const dialogPublishBtn = await dialog.$('button:has-text("Publish")');
-          if (dialogPublishBtn) {
-            const dialogBtnBox = await dialogPublishBtn.boundingBox();
-            if (dialogBtnBox) {
-              await page.mouse.click(dialogBtnBox.x + dialogBtnBox.width / 2, dialogBtnBox.y + dialogBtnBox.height / 2);
-              await page.waitForTimeout(5000);
-            }
-          }
-        }
-
-        // Check if we navigated to the published article
-        const postUrl = page.url();
-        if (postUrl.includes('/status/')) {
-          return postUrl;
-        }
-
-        // Check for success toast/alert
-        const successCheck = await page.$('text=Success');
-        if (successCheck) {
-          const viewLink = await page.$('a:has-text("View")');
-          if (viewLink) {
-            const href = await viewLink.getAttribute('href');
-            if (href) {
-              return href.startsWith('http') ? href : `https://x.com${href}`;
-            }
-          }
-          return 'Article published successfully!';
-        }
-      }
+      const publishedUrl = await publishArticle(page);
+      if (publishedUrl) return publishedUrl;
     } catch (e) {
-      // Publish failed, return draft URL instead
       console.error('Publish attempt failed:', e);
     }
   }
-  
-  if (draftUrl) {
-    return draftUrl;
-  }
-  
-  // If URL didn't update, navigate to articles list and find the newest draft
+
+  if (draftUrl) return draftUrl;
+
+  // Fallback: find newest draft from articles list
   await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2000);
-  
   const newestDraft = await page.evaluate(() => {
-    const links = document.querySelectorAll('a[href*="/compose/articles/edit/"]');
-    if (links.length > 0) {
-      return (links[0] as HTMLAnchorElement).href;
-    }
-    return null;
+    const link = document.querySelector('a[href*="/compose/articles/edit/"]') as HTMLAnchorElement | null;
+    return link?.href || null;
   });
-  
-  if (newestDraft) {
-    return newestDraft;
-  }
-  
-  return 'Draft saved. Open https://x.com/compose/articles to find it.';
+
+  return newestDraft || 'Draft saved. Open https://x.com/compose/articles to find it.';
 }
 
 export async function openLoginPage(): Promise<Page> {

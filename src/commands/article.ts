@@ -49,15 +49,12 @@ export async function articleCommand(title: string, options: ArticleOptions): Pr
     
     const result = await createArticle(finalTitle, finalContent, options.publish);
     
-    if (options.publish && (result.includes('/status/') || result.includes('published'))) {
-      console.log(chalk.green('✓ Article published!'));
-      console.log(chalk.cyan(result));
-    } else {
-      console.log(chalk.green('✓ Draft created with title!'));
-      console.log(chalk.yellow('Note: X Articles require manual editing. Open the link, add body content, then click Publish.'));
-      console.log(chalk.yellow('Or use --publish flag to auto-publish after creation.'));
-      console.log(chalk.cyan(result));
+    const published = options.publish && (result.includes('/status/') || result.includes('published'));
+    console.log(chalk.green(published ? '✓ Article published!' : '✓ Draft saved.'));
+    if (!published && !options.publish) {
+      console.log(chalk.yellow('Use --publish flag to publish automatically.'));
     }
+    console.log(chalk.cyan(result));
   } catch (error) {
     console.error(chalk.red('Failed to create article:'), error);
     process.exit(1);
