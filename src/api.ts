@@ -4,6 +4,36 @@ import { typeMarkdownContent } from './markdown.js';
 
 const X_URL = 'https://x.com';
 
+/** Navigate to a URL and dismiss any blocking modals. */
+async function gotoAndDismiss(page: Page, url: string, options?: { waitUntil?: 'domcontentloaded' | 'load'; timeout?: number }): Promise<void> {
+  await page.goto(url, { waitUntil: options?.waitUntil ?? 'domcontentloaded', timeout: options?.timeout ?? 30000 });
+  await dismissModals(page);
+}
+
+/** Dismiss cookie consent / login modals that block interaction on X pages. */
+async function dismissModals(page: Page): Promise<void> {
+  // Cookie consent overlay (twc-cc-mask or similar)
+  for (const selector of [
+    '[data-testid="BottomBar"] button',          // "Accept" in bottom cookie bar
+    '#layers [role="button"]:has-text("Accept")', // modal accept button
+    '[class*="cc-mask"] button',                  // twc-cc-mask buttons
+    '[data-testid="sheetDialog"] [role="button"]:has-text("Accept all")',
+  ]) {
+    const btn = await page.$(selector);
+    if (btn) {
+      await btn.click().catch(() => {});
+      await page.waitForTimeout(500);
+      break;
+    }
+  }
+  // Remove any leftover overlay that blocks clicks
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('[class*="cc-mask"], [class*="cookie"]')) {
+      (el as HTMLElement).style.display = 'none';
+    }
+  }).catch(() => {});
+}
+
 export interface Notification {
   action: string;
   username: string;
@@ -31,7 +61,7 @@ export interface TimelinePost {
 
 export async function isLoggedIn(): Promise<boolean> {
   const page = await getPage();
-  await page.goto(X_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, X_URL);
 
   // Wait for page to stabilize
   try {
@@ -55,7 +85,7 @@ export async function isLoggedIn(): Promise<boolean> {
 
 export async function post(text: string): Promise<string> {
   const page = await getPage();
-  await page.goto(X_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, X_URL);
 
   // Wait for and click the compose tweet button
   await page.waitForSelector('[data-testid="SideNav_NewTweet_Button"]', { timeout: 15000 });
@@ -91,7 +121,7 @@ export async function post(text: string): Promise<string> {
 
 export async function getTimeline(count = 10, following = false): Promise<TimelinePost[]> {
   const page = await getPage();
-  await page.goto(X_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, X_URL);
 
   // Wait for tabs to load and select the right one
   await page.waitForSelector('[role="tab"]', { timeout: 15000 });
@@ -178,7 +208,7 @@ export async function getTimeline(count = 10, following = false): Promise<Timeli
 
 export async function getNotifications(count = 20): Promise<Notification[]> {
   const page = await getPage();
-  await page.goto('https://x.com/notifications', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, 'https://x.com/notifications');
 
   // Wait for notifications to load
   await page.waitForSelector('[data-testid="cellInnerDiv"]', { timeout: 15000 });
@@ -303,7 +333,7 @@ export async function getNotifications(count = 20): Promise<Notification[]> {
 
 export async function getReplies(postUrl: string, count = 10): Promise<TimelinePost[]> {
   const page = await getPage();
-  await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, postUrl);
 
   // Wait for the main tweet and replies to load
   await page.waitForSelector('[data-testid="tweet"]', { timeout: 15000 });
@@ -371,7 +401,7 @@ export async function getReplies(postUrl: string, count = 10): Promise<TimelineP
 
 export async function reply(postUrl: string, text: string): Promise<string> {
   const page = await getPage();
-  await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, postUrl);
 
   // Wait for the tweet to load
   await page.waitForSelector('[data-testid="tweet"]', { timeout: 10000 });
@@ -403,7 +433,7 @@ export async function reply(postUrl: string, text: string): Promise<string> {
 
 export async function deletePost(postUrl: string): Promise<string> {
   const page = await getPage();
-  await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, postUrl);
 
   // Wait for the tweet to load
   await page.waitForSelector('[data-testid="tweet"]', { timeout: 10000 });
@@ -491,7 +521,7 @@ export async function createArticle(title: string, markdownContent: string, publ
   const page = await getPage();
 
   // Navigate and create new article
-  await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, 'https://x.com/compose/articles');
   await page.waitForTimeout(2000);
   const createButton = await page.locator('button:has-text("create"), [aria-label="create"]').first();
   await createButton.click({ force: true });
@@ -535,7 +565,7 @@ export async function createArticle(title: string, markdownContent: string, publ
   if (draftUrl) return draftUrl;
 
   // Fallback: find newest draft from articles list
-  await page.goto('https://x.com/compose/articles', { waitUntil: 'domcontentloaded' });
+  await gotoAndDismiss(page, 'https://x.com/compose/articles');
   await page.waitForTimeout(2000);
   const newestDraft = await page.evaluate(() => {
     const link = document.querySelector('a[href*="/compose/articles/edit/"]') as HTMLAnchorElement | null;
@@ -548,7 +578,7 @@ export async function createArticle(title: string, markdownContent: string, publ
 export async function openLoginPage(): Promise<Page> {
   const ctx = await getPersistentContext(false); // Non-headless for login
   const page = await ctx.newPage();
-  await page.goto('https://x.com/login', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await gotoAndDismiss(page, 'https://x.com/login', { timeout: 60000 });
   // Wait for login form to appear
   await page.waitForSelector('input[autocomplete="username"], input[name="text"], [data-testid="loginButton"]', { timeout: 30000 }).catch(() => {});
   return page;
@@ -577,7 +607,7 @@ export async function getAnalytics(days = 28): Promise<AnalyticsData> {
   const page = await getPage();
   
   // First get follower count from profile
-  await page.goto('https://x.com/WrenTheAI', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, 'https://x.com/WrenTheAI');
   await page.waitForTimeout(2000);
   
   const profileStats = await page.evaluate(() => {
@@ -647,7 +677,7 @@ export async function getMyPosts(count = 10): Promise<TimelinePost[]> {
   const page = await getPage();
   
   // Navigate to my profile
-  await page.goto('https://x.com/WrenTheAI', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, 'https://x.com/WrenTheAI');
   
   // Wait for posts to load
   await page.waitForSelector('[data-testid="tweet"]', { timeout: 15000 });
@@ -718,7 +748,7 @@ export async function searchPosts(query: string, count = 10, useTop = false): Pr
   
   // Navigate to search
   const searchUrl = `https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query${useTop ? '&f=top' : '&f=live'}`;
-  await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoAndDismiss(page, searchUrl);
   
   // Wait for results to load
   await page.waitForSelector('[data-testid="tweet"]', { timeout: 15000 });
