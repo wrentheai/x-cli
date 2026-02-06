@@ -465,12 +465,29 @@ export async function createArticle(title: string, markdownContent: string, publ
     }
   }
 
-  // Tab into the body editor and type content
+  // Tab into the body editor and insert content
   await page.keyboard.press('Tab');
   await page.waitForTimeout(300);
-  await page.keyboard.type(markdownContent, { delay: 10 });
-  await page.waitForTimeout(2000);
 
+  // Use execCommand insertText for instant input that editors recognize
+  const inserted = await page.evaluate((text) => {
+    const el = document.querySelector('[contenteditable="true"]') as HTMLElement | null;
+    if (el) {
+      el.focus();
+      return document.execCommand('insertText', false, text);
+    }
+    return false;
+  }, markdownContent);
+
+  // Fallback to keyboard.type for short content if execCommand failed
+  if (!inserted && markdownContent.length < 500) {
+    await page.keyboard.type(markdownContent, { delay: 10 });
+  }
+  await page.waitForTimeout(3000);
+
+  // Scroll back to top so Publish button is visible
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(500);
 
   // Get the URL which should now have the draft ID
   const currentUrl = page.url();
@@ -485,24 +502,28 @@ export async function createArticle(title: string, markdownContent: string, publ
       if (publishBtn) {
         const box = await publishBtn.boundingBox();
         if (box) {
-          // First click dismisses tooltip, second click triggers publish
+          // First click shows tooltip
           await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(1000);
+          // Click elsewhere to dismiss tooltip
+          await page.mouse.click(box.x - 100, box.y);
+          await page.waitForTimeout(500);
+          // Second click opens the publish dialog
           await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         }
         await page.waitForTimeout(3000);
 
         // Click the Publish button inside the confirmation dialog
-        // The dialog's Publish button is different from the top-bar one
-        const allPublishBtns = await page.$$('button:has-text("Publish")');
-        for (const btn of allPublishBtns) {
-          const isVisible = await btn.isVisible();
-          const btnBox = await btn.boundingBox();
-          // The dialog Publish button is in the modal area (not the top bar)
-          if (isVisible && btnBox && btnBox.y > 100 && btnBox.y < 300) {
-            await page.mouse.click(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2);
-            await page.waitForTimeout(5000);
-            break;
+        // Find the dialog first, then click its Publish button
+        const dialog = await page.$('[role="dialog"]');
+        if (dialog) {
+          const dialogPublishBtn = await dialog.$('button:has-text("Publish")');
+          if (dialogPublishBtn) {
+            const dialogBtnBox = await dialogPublishBtn.boundingBox();
+            if (dialogBtnBox) {
+              await page.mouse.click(dialogBtnBox.x + dialogBtnBox.width / 2, dialogBtnBox.y + dialogBtnBox.height / 2);
+              await page.waitForTimeout(5000);
+            }
           }
         }
 
