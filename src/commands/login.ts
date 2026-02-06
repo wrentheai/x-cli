@@ -1,26 +1,39 @@
 import chalk from 'chalk';
-import { openLoginPage, isLoggedIn } from '../api.js';
+import { openLoginPage, isLoggedIn, detectHandle } from '../api.js';
 import { closeBrowser, hasSessionData } from '../browser.js';
+import { registerAccount, resolveAccount, updateAccountHandle } from '../config.js';
 
-export async function loginCommand(): Promise<void> {
+export async function loginCommand(name?: string, globalOpts?: { account?: string }): Promise<void> {
   try {
-    if (hasSessionData()) {
-      console.log(chalk.blue('Existing session found. Checking if still valid...'));
-      const loggedIn = await isLoggedIn();
+    // Use explicit name argument, or fall back to --account flag, or 'default'
+    const accountName = name || globalOpts?.account || 'default';
+
+    if (hasSessionData(accountName)) {
+      console.log(chalk.blue(`Existing session found for "${accountName}". Checking if still valid...`));
+      const loggedIn = await isLoggedIn(accountName);
       if (loggedIn) {
-        console.log(chalk.green('✓ Already logged in!'));
+        console.log(chalk.green(`✓ Already logged in as "${accountName}"!`));
+        // Try to detect and save handle if not yet known
+        const handle = await detectHandle(accountName);
+        if (handle) {
+          registerAccount(accountName, handle);
+          console.log(chalk.gray(`Handle: ${handle}`));
+        }
         await closeBrowser();
         return;
       }
       console.log(chalk.yellow('Session expired. Opening browser for login...'));
     }
 
-    console.log(chalk.blue('Opening browser for login...'));
+    // Register the account (will set as default if first account)
+    registerAccount(accountName);
+
+    console.log(chalk.blue(`Opening browser for login as "${accountName}"...`));
     console.log(chalk.gray('Please log in to X in the browser window.'));
     console.log(chalk.gray('The CLI will detect when you\'re logged in.'));
     console.log('');
 
-    const page = await openLoginPage();
+    const page = await openLoginPage(accountName);
 
     // Wait for user to log in
     console.log(chalk.yellow('Waiting for login... (press Ctrl+C to cancel)'));
@@ -42,7 +55,26 @@ export async function loginCommand(): Promise<void> {
 
         if (loggedIn) {
           console.log('');
-          console.log(chalk.green('✓ Login successful!'));
+          console.log(chalk.green(`✓ Login successful for "${accountName}"!`));
+
+          // Detect handle from sidebar
+          const handle = await page.evaluate(() => {
+            const accountBtn = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
+            if (accountBtn) {
+              const spans = accountBtn.querySelectorAll('span');
+              for (const span of Array.from(spans)) {
+                const text = span.textContent?.trim() || '';
+                if (text.startsWith('@')) return text;
+              }
+            }
+            return null;
+          });
+
+          if (handle) {
+            updateAccountHandle(accountName, handle);
+            console.log(chalk.gray(`Handle: ${handle}`));
+          }
+
           console.log(chalk.gray('Your session has been saved. You can now use other x-cli commands.'));
           break;
         }

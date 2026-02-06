@@ -1,15 +1,17 @@
 import chalk from 'chalk';
 import { getTimeline, isLoggedIn, TimelinePost } from '../api.js';
 import { closeBrowser } from '../browser.js';
+import { resolveAccount } from '../config.js';
 
-export async function timelineCommand(options: { count?: string; following?: boolean }): Promise<void> {
+export async function timelineCommand(options: { count?: string; following?: boolean }, globalOpts?: { account?: string }): Promise<void> {
   try {
+    const accountName = resolveAccount(globalOpts?.account);
     const count = parseInt(options.count || '10', 10);
     const useFollowing = options.following || false;
 
     console.log(chalk.blue('Checking login status...'));
 
-    const loggedIn = await isLoggedIn();
+    const loggedIn = await isLoggedIn(accountName);
     if (!loggedIn) {
       console.log(chalk.red('Not logged in. Please run: x-cli login'));
       await closeBrowser();
@@ -18,7 +20,7 @@ export async function timelineCommand(options: { count?: string; following?: boo
 
     const feedType = useFollowing ? 'Following' : 'For You';
     console.log(chalk.blue(`Fetching ${feedType} timeline...`));
-    const posts = await getTimeline(count, useFollowing);
+    const posts = await getTimeline(accountName, count, useFollowing);
 
     if (posts.length === 0) {
       console.log(chalk.yellow('No posts found in timeline.'));

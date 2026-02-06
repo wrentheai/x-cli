@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { createArticle, isLoggedIn } from '../api.js';
 import { closeBrowser } from '../browser.js';
 import { parseMarkdown } from '../markdown.js';
+import { resolveAccount } from '../config.js';
 
 interface ArticleOptions {
   file?: string;
@@ -10,7 +11,7 @@ interface ArticleOptions {
   publish?: boolean;
 }
 
-export async function articleCommand(title: string, options: ArticleOptions): Promise<void> {
+export async function articleCommand(title: string, options: ArticleOptions, globalOpts?: { account?: string }): Promise<void> {
   try {
     let content: string;
 
@@ -28,9 +29,10 @@ export async function articleCommand(title: string, options: ArticleOptions): Pr
       process.exit(1);
     }
 
+    const accountName = resolveAccount(globalOpts?.account);
     console.log(chalk.blue('Checking login status...'));
 
-    const loggedIn = await isLoggedIn();
+    const loggedIn = await isLoggedIn(accountName);
     if (!loggedIn) {
       console.log(chalk.red('Not logged in. Please run: x-cli login'));
       await closeBrowser();
@@ -46,9 +48,9 @@ export async function articleCommand(title: string, options: ArticleOptions): Pr
     if (options.publish) {
       console.log(chalk.blue('Will attempt to publish after creation...'));
     }
-    
-    const result = await createArticle(finalTitle, finalContent, options.publish);
-    
+
+    const result = await createArticle(accountName, finalTitle, finalContent, options.publish);
+
     const published = options.publish && (result.includes('/status/') || result.includes('published'));
     console.log(chalk.green(published ? '✓ Article published!' : '✓ Draft saved.'));
     if (!published && !options.publish) {

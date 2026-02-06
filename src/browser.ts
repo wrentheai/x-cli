@@ -1,12 +1,10 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
-import { homedir } from 'os';
-import { join } from 'path';
 import { existsSync, rmSync } from 'fs';
-
-const USER_DATA_DIR = join(homedir(), '.x-cli-data');
+import { getAccountDataDir } from './config.js';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
+let activeAccount: string | null = null;
 
 // Use real Chrome to avoid bot detection
 const BROWSER_OPTIONS = {
@@ -24,32 +22,42 @@ const CONTEXT_OPTIONS = {
   timezoneId: 'America/Los_Angeles',
 };
 
-export async function getBrowserContext(headless = true): Promise<BrowserContext> {
-  if (context) return context;
+export async function getBrowserContext(accountName: string, headless = true): Promise<BrowserContext> {
+  if (context && activeAccount === accountName) return context;
 
+  // Close existing context if switching accounts
+  await closeBrowser();
+
+  const dataDir = getAccountDataDir(accountName);
   browser = await chromium.launch({ ...BROWSER_OPTIONS, headless });
   context = await browser.newContext({
     ...CONTEXT_OPTIONS,
-    storageState: getStorageStatePath(),
+    storageState: getStorageStatePath(accountName),
   });
+  activeAccount = accountName;
 
   return context;
 }
 
-export async function getPersistentContext(headless = true): Promise<BrowserContext> {
-  if (context) return context;
+export async function getPersistentContext(accountName: string, headless = true): Promise<BrowserContext> {
+  if (context && activeAccount === accountName) return context;
 
-  context = await chromium.launchPersistentContext(USER_DATA_DIR, {
+  // Close existing context if switching accounts
+  await closeBrowser();
+
+  const dataDir = getAccountDataDir(accountName);
+  context = await chromium.launchPersistentContext(dataDir, {
     ...BROWSER_OPTIONS,
     ...CONTEXT_OPTIONS,
     headless,
   });
+  activeAccount = accountName;
 
   return context;
 }
 
-export async function getPage(): Promise<Page> {
-  const ctx = await getPersistentContext();
+export async function getPage(accountName: string): Promise<Page> {
+  const ctx = await getPersistentContext(accountName);
   const pages = ctx.pages();
   return pages.length > 0 ? pages[0] : await ctx.newPage();
 }
@@ -63,28 +71,30 @@ export async function closeBrowser(): Promise<void> {
     await browser.close();
     browser = null;
   }
+  activeAccount = null;
 }
 
-function getStorageStatePath(): string | undefined {
-  const path = join(USER_DATA_DIR, 'storage-state.json');
+function getStorageStatePath(accountName: string): string | undefined {
+  const dataDir = getAccountDataDir(accountName);
+  const path = `${dataDir}/storage-state.json`;
   return existsSync(path) ? path : undefined;
 }
 
-export async function saveStorageState(): Promise<void> {
+export async function saveStorageState(accountName: string): Promise<void> {
   if (context) {
-    const path = join(USER_DATA_DIR, 'storage-state.json');
+    const dataDir = getAccountDataDir(accountName);
+    const path = `${dataDir}/storage-state.json`;
     await context.storageState({ path });
   }
 }
 
-export function clearSessionData(): void {
-  if (existsSync(USER_DATA_DIR)) {
-    rmSync(USER_DATA_DIR, { recursive: true, force: true });
+export function clearSessionData(accountName: string): void {
+  const dataDir = getAccountDataDir(accountName);
+  if (existsSync(dataDir)) {
+    rmSync(dataDir, { recursive: true, force: true });
   }
 }
 
-export function hasSessionData(): boolean {
-  return existsSync(USER_DATA_DIR);
+export function hasSessionData(accountName: string): boolean {
+  return existsSync(getAccountDataDir(accountName));
 }
-
-export { USER_DATA_DIR };

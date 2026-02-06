@@ -1,14 +1,16 @@
 import chalk from 'chalk';
 import { getAnalytics, isLoggedIn, AnalyticsData } from '../api.js';
 import { closeBrowser } from '../browser.js';
+import { resolveAccount } from '../config.js';
 
-export async function analyticsCommand(options: { days?: string }): Promise<void> {
+export async function analyticsCommand(options: { days?: string }, globalOpts?: { account?: string }): Promise<void> {
   try {
+    const accountName = resolveAccount(globalOpts?.account);
     const days = parseInt(options.days || '28', 10);
 
     console.log(chalk.blue('Checking login status...'));
 
-    const loggedIn = await isLoggedIn();
+    const loggedIn = await isLoggedIn(accountName);
     if (!loggedIn) {
       console.log(chalk.red('Not logged in. Please run: x-cli login'));
       await closeBrowser();
@@ -16,7 +18,7 @@ export async function analyticsCommand(options: { days?: string }): Promise<void
     }
 
     console.log(chalk.blue(`Fetching analytics (last ${days} days)...`));
-    const analytics = await getAnalytics(days);
+    const analytics = await getAnalytics(accountName, days);
 
     console.log('');
     console.log(chalk.bold('=== Account Analytics ==='));
