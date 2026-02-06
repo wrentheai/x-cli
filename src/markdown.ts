@@ -66,8 +66,7 @@ async function processToken(page: Page, token: MarkdownToken): Promise<void> {
       break;
 
     case 'space':
-      await page.keyboard.press('Enter');
-      await page.keyboard.press('Enter');
+      // Spacing is handled by paragraph/heading Enter presses
       break;
 
     case 'list':
@@ -165,8 +164,6 @@ async function typeHeading(page: Page, token: MarkdownToken): Promise<void> {
       await page.waitForTimeout(200);
     }
   }
-
-  await page.keyboard.press('Enter');
 }
 
 async function typeParagraph(page: Page, token: MarkdownToken): Promise<void> {
@@ -177,7 +174,6 @@ async function typeParagraph(page: Page, token: MarkdownToken): Promise<void> {
   } else if (token.text) {
     await page.keyboard.type(token.text, { delay: 1 });
   }
-  await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
 }
 
